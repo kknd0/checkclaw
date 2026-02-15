@@ -1,0 +1,19 @@
+{
+  "name": "checkclaw",
+  "version": "0.0.1",
+  "description": "CLI tool for querying financial data via Plaid API",
+  "keywords": ["cli", "plaid", "finance", "banking", "transactions"],
+  "bin": {
+    "checkclaw": "./bin/checkclaw.js"
+  },
+  "main": "dist/index.js",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
