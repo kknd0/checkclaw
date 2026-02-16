@@ -37,3 +37,12 @@ export function error(message: string): void {
 export function stub(commandName: string): void {
   warn(`"${commandName}" is not yet implemented. Coming soon.`);
 }
+
+export function handleError(err: unknown): void {
+  if (err instanceof Error) {
+    error(err.message);
+  } else {
+    error(String(err));
+  }
+  process.exitCode = 1;
+}

@@ -1,8 +1,8 @@
 import { Command } from 'commander';
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import { requireAuth } from '../lib/config.js';
 import { startLinkServer, LINK_URL } from '../lib/link-server.js';
-import { success, error, info, createTable } from '../utils/format.js';
+import { success, info, createTable, handleError } from '../utils/format.js';
 import { openUrl } from '../utils/browser.js';
 import type { LinkItem } from '../types.js';
 
@@ -54,7 +54,7 @@ export function registerLinkCommand(program: Command): void {
         const result = await startLinkServer(link_token);
 
         if ('error' in result) {
-          error(`Bank connection cancelled: ${result.error}`);
+          handleError(new Error(`Bank connection cancelled: ${result.error}`));
           return;
         }
 
@@ -65,11 +65,7 @@ export function registerLinkCommand(program: Command): void {
 
         success('Bank account connected successfully!');
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 }

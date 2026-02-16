@@ -1,9 +1,8 @@
 import { Command } from 'commander';
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import { setApiKey, requireAuth } from '../lib/config.js';
-import { success, error, info, createTable, formatCurrency } from '../utils/format.js';
+import { success, info, createTable, formatCurrency, handleError } from '../utils/format.js';
 import { prompt, promptSecret } from '../utils/prompt.js';
-import { openUrl } from '../utils/browser.js';
 import type { AuthResponse, UserInfo, BillingPlan, Invoice } from '../types.js';
 
 export function registerAuthCommands(program: Command): void {
@@ -17,8 +16,9 @@ export function registerAuthCommands(program: Command): void {
         const confirmPw = await promptSecret('Confirm password: ');
 
         if (password !== confirmPw) {
-          error('Passwords do not match.');
-          process.exit(1);
+          console.error('Passwords do not match.');
+          process.exitCode = 1;
+          return;
         }
 
         const res = await api.post<AuthResponse>('/auth/signup', {
@@ -29,11 +29,7 @@ export function registerAuthCommands(program: Command): void {
         setApiKey(res.api_key);
         success(`Account created! Logged in as ${res.user.email}`);
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 
@@ -61,11 +57,7 @@ export function registerAuthCommands(program: Command): void {
         setApiKey(res.api_key);
         success(`Logged in as ${res.user.email}`);
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 
@@ -99,11 +91,7 @@ export function registerAuthCommands(program: Command): void {
           `\nNext invoice: ${formatCurrency(plan.price)} on ${plan.current_period_end}`,
         );
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 
@@ -133,11 +121,7 @@ export function registerAuthCommands(program: Command): void {
         }
         console.log(table.toString());
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 }

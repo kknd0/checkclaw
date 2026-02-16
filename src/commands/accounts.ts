@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import { requireAuth } from '../lib/config.js';
-import { error, info, createTable, formatCurrency } from '../utils/format.js';
+import { info, createTable, formatCurrency, handleError } from '../utils/format.js';
 import type { Account } from '../types.js';
 
 export function registerAccountsCommand(program: Command): void {
@@ -46,11 +46,7 @@ export function registerAccountsCommand(program: Command): void {
         }
         console.log(table.toString());
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 }

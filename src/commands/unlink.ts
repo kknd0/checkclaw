@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import { requireAuth } from '../lib/config.js';
-import { success, error, info, warn } from '../utils/format.js';
+import { success, info, handleError } from '../utils/format.js';
 import { confirm, select } from '../utils/prompt.js';
 import type { LinkItem } from '../types.js';
 
@@ -59,11 +59,7 @@ export function registerUnlinkCommand(program: Command): void {
         await api.delete(`/link/${itemId}`);
         success(`Disconnected ${item.institution}`);
       } catch (err) {
-        if (err instanceof ApiError) {
-          error(err.message);
-        } else {
-          throw err;
-        }
+        handleError(err);
       }
     });
 }

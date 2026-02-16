@@ -27,11 +27,29 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  const res = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    const cause = (err as any)?.cause;
+    if (cause?.code === 'ENOTFOUND') {
+      throw new ApiError(
+        `Cannot reach API server at ${baseUrl}. Is the backend running?`,
+        0,
+      );
+    }
+    if (cause?.code === 'ECONNREFUSED') {
+      throw new ApiError(
+        `Connection refused by ${baseUrl}. Is the backend running?`,
+        0,
+      );
+    }
+    throw new ApiError(`Network error: ${(err as Error).message}`, 0);
+  }
 
   if (!res.ok) {
     const text = await res.text();

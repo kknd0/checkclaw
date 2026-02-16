@@ -2,14 +2,13 @@ import { writeFileSync } from 'fs';
 import { Command } from 'commander';
 import { stringify } from 'csv-stringify/sync';
 import chalk from 'chalk';
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import { requireAuth } from '../lib/config.js';
 import {
-  error,
   info,
   success,
-  createTable,
   formatCurrency,
+  handleError,
 } from '../utils/format.js';
 import { buildDateRange } from '../utils/date.js';
 import type { TransactionsResponse, Transaction } from '../types.js';
@@ -70,11 +69,7 @@ export function registerExportCommand(program: Command): void {
             console.log(output);
           }
         } catch (err) {
-          if (err instanceof ApiError) {
-            error(err.message);
-          } else {
-            throw err;
-          }
+          handleError(err);
         }
       },
     );
