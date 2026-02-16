@@ -1,4 +1,5 @@
 import Conf from 'conf';
+import { error } from '../utils/format.js';
 
 const config = new Conf({
   projectName: 'checkclaw',
@@ -28,4 +29,13 @@ export function getApiBaseUrl(): string {
 
 export function isLoggedIn(): boolean {
   return !!getApiKey();
+}
+
+export function requireAuth(): string {
+  const key = getApiKey();
+  if (!key) {
+    error('Not logged in. Run "checkclaw login" first.');
+    process.exit(1);
+  }
+  return key;
 }

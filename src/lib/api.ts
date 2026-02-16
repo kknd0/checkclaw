@@ -48,8 +48,26 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+function buildUrl(
+  path: string,
+  params?: Record<string, string | number | boolean | undefined>,
+): string {
+  if (!params) return path;
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) {
+      qs.set(key, String(value));
+    }
+  }
+  const queryString = qs.toString();
+  return queryString ? `${path}?${queryString}` : path;
+}
+
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(
+    path: string,
+    params?: Record<string, string | number | boolean | undefined>,
+  ) => request<T>('GET', buildUrl(path, params)),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
 };
