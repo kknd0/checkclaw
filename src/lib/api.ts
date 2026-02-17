@@ -46,7 +46,15 @@ export async function apiRequest<T = unknown>(
     if (key) headers['Authorization'] = `Bearer ${key}`;
   } else if (authType === 'session') {
     const token = getSessionToken();
-    if (token) headers['Cookie'] = token;
+    if (token) {
+      // If token looks like a cookie string (contains =), send as Cookie
+      // Otherwise it's a bearer token from device auth flow
+      if (token.includes('=')) {
+        headers['Cookie'] = token;
+      } else {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
   }
 
   const fetchOptions: RequestInit = {

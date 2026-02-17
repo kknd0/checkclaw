@@ -5,6 +5,8 @@ import chalk from 'chalk';
 import { apiRequest } from '../lib/api.js';
 import { saveApiKey, saveSession, clearAuth, isAuthenticated, getApiUrl } from '../lib/config.js';
 
+const VERIFICATION_URL = 'https://checkclaw.com/device';
+
 function prompt(question: string, hide = false): Promise<string> {
   return new Promise((resolve) => {
     const rl = createInterface({
@@ -135,6 +137,135 @@ function startCallbackServer(): Promise<{ port: number; waitForKey: () => Promis
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function deviceAuthFlow(): Promise<void> {
+  const baseUrl = getApiUrl();
+
+  // 1. Request device code
+  console.log(chalk.dim('Requesting device code...'));
+
+  const codeRes = await fetch(`${baseUrl}/api/auth/device/code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: 'checkclaw-cli' }),
+  });
+
+  if (!codeRes.ok) {
+    const err = await codeRes.json().catch(() => ({})) as Record<string, string>;
+    throw new Error(err.error_description || err.error || 'Failed to request device code');
+  }
+
+  const codeData = await codeRes.json() as {
+    device_code: string;
+    user_code: string;
+    verification_uri: string;
+    verification_uri_complete: string;
+    expires_in: number;
+    interval: number;
+  };
+
+  const { device_code, user_code, verification_uri_complete, expires_in } = codeData;
+  let interval = codeData.interval;
+
+  // 2. Display code
+  console.log();
+  console.log(chalk.bold('  Your code: ') + chalk.cyan.bold(user_code));
+  console.log();
+  console.log(chalk.dim('  Visit: ') + chalk.cyan(verification_uri_complete || VERIFICATION_URL));
+  console.log();
+
+  // 3. Open browser
+  const verifyUrl = verification_uri_complete || `${VERIFICATION_URL}?user_code=${encodeURIComponent(user_code)}`;
+  await openBrowser(verifyUrl);
+
+  // 4. Poll for token
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let frameIdx = 0;
+  const deadline = Date.now() + expires_in * 1000;
+
+  process.stdout.write(chalk.dim(`  Waiting for authorization ${frames[0]}`));
+
+  while (Date.now() < deadline) {
+    await sleep(interval * 1000);
+
+    // Spinner
+    frameIdx = (frameIdx + 1) % frames.length;
+    process.stdout.write(`\r${chalk.dim(`  Waiting for authorization ${frames[frameIdx]}`)}`);
+
+    try {
+      const tokenRes = await fetch(`${baseUrl}/api/auth/device/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          device_code,
+          client_id: 'checkclaw-cli',
+        }),
+      });
+
+      const tokenData = await tokenRes.json() as {
+        access_token?: string;
+        token_type?: string;
+        expires_in?: number;
+        scope?: string;
+        error?: string;
+        error_description?: string;
+      };
+
+      if (tokenData.access_token) {
+        // Clear spinner line
+        process.stdout.write('\r' + ' '.repeat(50) + '\r');
+
+        // Save the bearer token as a session token
+        saveSession(tokenData.access_token);
+
+        console.log(chalk.green('  ✓ Logged in successfully!'));
+
+        // Verify identity
+        const meRes = await apiRequest<{ id?: string; email?: string; name?: string }>('/auth/me');
+        if (meRes.ok && typeof meRes.data === 'object' && meRes.data?.email) {
+          console.log(chalk.dim(`  Authenticated as ${meRes.data.email}`));
+        }
+        return;
+      }
+
+      if (tokenData.error === 'authorization_pending') {
+        continue;
+      }
+
+      if (tokenData.error === 'slow_down') {
+        interval += 5;
+        continue;
+      }
+
+      if (tokenData.error === 'expired_token') {
+        process.stdout.write('\r' + ' '.repeat(50) + '\r');
+        throw new Error('Code expired. Please try again.');
+      }
+
+      if (tokenData.error === 'access_denied') {
+        process.stdout.write('\r' + ' '.repeat(50) + '\r');
+        throw new Error('Authorization denied.');
+      }
+
+      process.stdout.write('\r' + ' '.repeat(50) + '\r');
+      throw new Error(tokenData.error_description || tokenData.error || 'Unknown error');
+    } catch (err) {
+      if ((err as Error).message.includes('fetch')) {
+        // Network error — keep polling
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  process.stdout.write('\r' + ' '.repeat(50) + '\r');
+  throw new Error('Code expired. Please try again.');
+}
+
 export function registerAuthCommands(program: Command): void {
   program
     .command('signup')
@@ -182,6 +313,7 @@ export function registerAuthCommands(program: Command): void {
     .description('Log in to your checkclaw account')
     .option('--key <api-key>', 'Log in with an API key directly')
     .option('--email', 'Log in with email/password (no browser)')
+    .option('--browser', 'Use legacy browser callback login')
     .action(async (opts) => {
       try {
         // Direct API key login
@@ -240,31 +372,37 @@ export function registerAuthCommands(program: Command): void {
           return;
         }
 
-        // Default: Browser-based login
-        console.log(chalk.dim('Starting browser login...'));
+        // Legacy browser-based login
+        if (opts.browser) {
+          console.log(chalk.dim('Starting browser login...'));
 
-        const { port, waitForKey } = await startCallbackServer();
-        const authUrl = `https://checkclaw.com/cli-auth?port=${port}`;
+          const { port, waitForKey } = await startCallbackServer();
+          const authUrl = `https://checkclaw.com/cli-auth?port=${port}`;
 
-        console.log();
-        console.log(chalk.bold('  Opening browser to authorize...'));
-        console.log();
-        console.log(chalk.dim('  If the browser doesn\'t open, visit:'));
-        console.log(chalk.cyan(`  ${authUrl}`));
-        console.log();
-        console.log(chalk.dim('  Waiting for authorization...'));
+          console.log();
+          console.log(chalk.bold('  Opening browser to authorize...'));
+          console.log();
+          console.log(chalk.dim('  If the browser doesn\'t open, visit:'));
+          console.log(chalk.cyan(`  ${authUrl}`));
+          console.log();
+          console.log(chalk.dim('  Waiting for authorization...'));
 
-        await openBrowser(authUrl);
+          await openBrowser(authUrl);
 
-        const { apiKey, email } = await waitForKey();
+          const { apiKey, email } = await waitForKey();
 
-        saveApiKey(apiKey);
-        console.log();
-        console.log(chalk.green('✓ Logged in successfully!'));
-        if (email) {
-          console.log(chalk.dim(`  Authenticated as ${email}`));
+          saveApiKey(apiKey);
+          console.log();
+          console.log(chalk.green('✓ Logged in successfully!'));
+          if (email) {
+            console.log(chalk.dim(`  Authenticated as ${email}`));
+          }
+          console.log(chalk.dim(`  API key saved to local config.`));
+          return;
         }
-        console.log(chalk.dim(`  API key saved to local config.`));
+
+        // Default: Device Authorization Flow
+        await deviceAuthFlow();
       } catch (err) {
         console.error(chalk.red(`Error: ${(err as Error).message}`));
         process.exit(1);
