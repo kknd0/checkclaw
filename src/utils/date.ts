@@ -1,31 +1,24 @@
-export function formatDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-export function daysAgo(n: number): string {
+export function daysAgo(days: number): string {
   const d = new Date();
-  d.setDate(d.getDate() - n);
+  d.setDate(d.getDate() - days);
   return formatDate(d);
 }
 
-export function parseDate(input: string): Date {
-  const match = /^\d{4}-\d{2}-\d{2}$/.test(input);
-  if (!match) {
-    throw new Error(`Invalid date format: "${input}". Expected YYYY-MM-DD.`);
-  }
-  const date = new Date(input + 'T00:00:00');
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid date: "${input}".`);
-  }
-  return date;
+export function today(): string {
+  return formatDate(new Date());
 }
 
-export function buildDateRange(opts: {
-  days?: number;
-  from?: string;
-  to?: string;
-}): { from: string; to: string } {
-  const to = opts.to || formatDate(new Date());
-  const from = opts.from || daysAgo(opts.days || 30);
-  return { from, to };
+export function formatDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function parseDate(str: string): Date {
+  const d = new Date(str + 'T00:00:00');
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid date: ${str}. Use YYYY-MM-DD format.`);
+  }
+  return d;
 }

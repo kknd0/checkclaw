@@ -1,13 +1,30 @@
 {
   "name": "checkclaw",
-  "version": "0.0.1",
-  "description": "CLI tool for querying financial data via Plaid API",
-  "keywords": ["cli", "plaid", "finance", "banking", "transactions"],
+  "version": "1.0.0",
+  "description": "CLI for checkclaw - query bank accounts, transactions, and manage financial data",
+  "type": "module",
   "bin": {
     "checkclaw": "./bin/checkclaw.js"
   },
-  "main": "dist/index.js",
-  "type": "module",
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "plaid",
+    "banking",
+    "finance",
+    "cli",
+    "transactions",
+    "accounts",
+    "export"
+  ],
+  "author": "Lizi Li",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,23 +33,17 @@
   "engines": {
     "node": ">=18"
   },
-  "scripts": {
-    "dev": "tsx src/index.ts",
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
-  },
   "dependencies": {
-    "chalk": "^5",
-    "cli-table3": "^0.6",
-    "commander": "^14",
-    "conf": "^13",
-    "csv-stringify": "^6"
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "conf": "^13.0.1",
+    "csv-stringify": "^6.5.2",
+    "open": "^10.1.0"
   },
   "devDependencies": {
-    "@types/node": "^18",
-    "tsup": "^8",
-    "tsx": "^4",
-    "typescript": "^5"
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
   }
 }

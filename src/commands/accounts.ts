@@ -1,52 +1,78 @@
 import { Command } from 'commander';
-import { api } from '../lib/api.js';
-import { requireAuth } from '../lib/config.js';
-import { info, createTable, formatCurrency, handleError } from '../utils/format.js';
-import type { Account } from '../types.js';
+import chalk from 'chalk';
+import Table from 'cli-table3';
+import { apiRequest, requireAuth } from '../lib/api.js';
+import { formatCurrencyPlain } from '../utils/format.js';
+
+interface Account {
+  id: string;
+  name: string;
+  type: string;
+  subtype: string;
+  balance: {
+    available: number | null;
+    current: number | null;
+    currency: string;
+  };
+}
 
 export function registerAccountsCommand(program: Command): void {
   program
     .command('accounts')
-    .description('List connected accounts and balances')
+    .description('List all connected accounts with balances')
     .option('--type <type>', 'Filter by account type (checking, savings, credit)')
-    .action(async (opts: { type?: string }) => {
-      try {
-        requireAuth();
+    .action(async (opts) => {
+      requireAuth();
 
-        let { accounts } = await api.get<{ accounts: Account[] }>(
-          '/accounts/balance',
-        );
+      try {
+        const res = await apiRequest<{ accounts: Account[] }>('/accounts/balance');
+        if (!res.ok) {
+          console.error(chalk.red('Failed to fetch accounts.'));
+          process.exit(1);
+        }
+
+        let accounts = res.data.accounts || [];
+        if (accounts.length === 0) {
+          console.log(chalk.dim('No accounts found.'));
+          console.log(chalk.dim('Run `checkclaw link` to connect a bank first.'));
+          return;
+        }
 
         if (opts.type) {
           accounts = accounts.filter(
             (a) =>
-              a.subtype === opts.type ||
-              a.type === opts.type,
+              a.type.toLowerCase() === opts.type.toLowerCase() ||
+              a.subtype.toLowerCase() === opts.type.toLowerCase()
           );
         }
 
-        if (accounts.length === 0) {
-          info('No accounts found.');
-          return;
-        }
+        const table = new Table({
+          head: [
+            chalk.bold('Account'),
+            chalk.bold('Type'),
+            chalk.bold('Available'),
+            chalk.bold('Current'),
+          ],
+          colAligns: ['left', 'left', 'right', 'right'],
+        });
 
-        const table = createTable([
-          'Account',
-          'Type',
-          'Available',
-          'Current',
-        ]);
-        for (const acct of accounts) {
+        for (const acc of accounts) {
           table.push([
-            acct.name,
-            acct.subtype,
-            formatCurrency(acct.balance.available),
-            formatCurrency(acct.balance.current),
+            acc.name,
+            acc.subtype || acc.type,
+            acc.balance.available !== null
+              ? formatCurrencyPlain(acc.balance.available)
+              : '-',
+            acc.balance.current !== null
+              ? formatCurrencyPlain(acc.balance.current)
+              : '-',
           ]);
         }
+
         console.log(table.toString());
       } catch (err) {
-        handleError(err);
+        console.error(chalk.red(`Error: ${(err as Error).message}`));
+        process.exit(1);
       }
     });
 }

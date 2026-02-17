@@ -1,143 +1,139 @@
-import { writeFileSync } from 'fs';
 import { Command } from 'commander';
-import { stringify } from 'csv-stringify/sync';
 import chalk from 'chalk';
-import { api } from '../lib/api.js';
-import { requireAuth } from '../lib/config.js';
-import {
-  info,
-  success,
-  formatCurrency,
-  handleError,
-} from '../utils/format.js';
-import { buildDateRange } from '../utils/date.js';
-import type { TransactionsResponse, Transaction } from '../types.js';
+import { apiRequest, requireAuth } from '../lib/api.js';
+import { formatCurrencyPlain, barChart } from '../utils/format.js';
+import { daysAgo, today } from '../utils/date.js';
+import { stringify } from 'csv-stringify/sync';
+import { writeFileSync } from 'fs';
+
+interface Transaction {
+  id: string;
+  date: string;
+  merchant?: string;
+  name?: string;
+  amount: number;
+  category?: string[];
+  account_id?: string;
+}
 
 export function registerExportCommand(program: Command): void {
   program
     .command('export')
-    .description('Export transaction data')
-    .option('--format <type>', 'Output format (csv, json)', 'csv')
-    .option('--days <n>', 'Number of days to export', '30')
+    .description('Export transactions to CSV or JSON')
+    .option('--format <format>', 'Output format: csv or json (default: csv)', 'csv')
+    .option('--days <n>', 'Number of days to export (default: 30)', '30')
     .option('--from <date>', 'Start date (YYYY-MM-DD)')
     .option('--to <date>', 'End date (YYYY-MM-DD)')
     .option('-o, --output <file>', 'Output file path')
-    .option('--summary', 'Show category spending summary')
-    .action(
-      async (opts: {
-        format: string;
-        days?: string;
-        from?: string;
-        to?: string;
-        output?: string;
-        summary?: boolean;
-      }) => {
-        try {
-          requireAuth();
+    .option('--summary', 'Show category spending summary instead of raw data')
+    .action(async (opts) => {
+      requireAuth();
 
-          const range = buildDateRange({
-            days: opts.days ? parseInt(opts.days, 10) : undefined,
-            from: opts.from,
-            to: opts.to,
+      try {
+        const from = opts.from || daysAgo(parseInt(opts.days, 10));
+        const to = opts.to || today();
+
+        // Fetch all transactions
+        const res = await apiRequest<{ transactions: Transaction[] }>(
+          '/transactions',
+          {
+            query: { from, to, limit: 1000 },
+          }
+        );
+
+        if (!res.ok) {
+          console.error(chalk.red('Failed to fetch transactions.'));
+          process.exit(1);
+        }
+
+        const txns = res.data.transactions || [];
+        if (txns.length === 0) {
+          console.log(chalk.dim('No transactions found.'));
+          return;
+        }
+
+        if (opts.summary) {
+          showSummary(txns, from, to);
+          return;
+        }
+
+        const format = opts.format.toLowerCase();
+
+        if (format === 'json') {
+          const json = JSON.stringify(txns, null, 2);
+          if (opts.output) {
+            writeFileSync(opts.output, json);
+            console.log(chalk.green(`✓ Exported ${txns.length} transactions to ${opts.output}`));
+          } else {
+            console.log(json);
+          }
+        } else {
+          // CSV
+          const records = txns.map((tx) => ({
+            date: tx.date,
+            merchant: tx.merchant || tx.name || '',
+            amount: tx.amount,
+            category: tx.category ? tx.category.join(' > ') : '',
+            account_id: tx.account_id || '',
+          }));
+
+          const csv = stringify(records, {
+            header: true,
+            columns: ['date', 'merchant', 'amount', 'category', 'account_id'],
           });
 
-          const { transactions } = await api.get<TransactionsResponse>(
-            '/transactions',
-            {
-              from: range.from,
-              to: range.to,
-              limit: 1000,
-            },
-          );
-
-          if (transactions.length === 0) {
-            info('No transactions found for the given period.');
-            return;
-          }
-
-          if (opts.summary) {
-            printSummary(transactions, range.from, range.to);
-            return;
-          }
-
-          const output = formatData(transactions, opts.format);
-
           if (opts.output) {
-            writeFileSync(opts.output, output, 'utf-8');
-            success(`Exported ${transactions.length} transactions to ${opts.output}`);
+            writeFileSync(opts.output, csv);
+            console.log(chalk.green(`✓ Exported ${txns.length} transactions to ${opts.output}`));
           } else {
-            console.log(output);
+            process.stdout.write(csv);
           }
-        } catch (err) {
-          handleError(err);
         }
-      },
-    );
+      } catch (err) {
+        console.error(chalk.red(`Error: ${(err as Error).message}`));
+        process.exit(1);
+      }
+    });
 }
 
-function formatData(transactions: Transaction[], format: string): string {
-  if (format === 'json') {
-    return JSON.stringify(transactions, null, 2);
-  }
-
-  return stringify(
-    transactions.map((tx) => ({
-      date: tx.date,
-      merchant: tx.merchant,
-      amount: tx.amount,
-      category: tx.category.join(' > '),
-      account_id: tx.account_id,
-    })),
-    { header: true },
-  );
-}
-
-function printSummary(
-  transactions: Transaction[],
-  from: string,
-  to: string,
-): void {
-  const categoryTotals: Record<string, number> = {};
+function showSummary(transactions: Transaction[], from: string, to: string): void {
+  // Group by top-level category
+  const categories = new Map<string, number>();
   let totalSpent = 0;
   let totalIncome = 0;
 
   for (const tx of transactions) {
     if (tx.amount < 0) {
-      const cat = tx.category[0] || 'Other';
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + Math.abs(tx.amount);
+      const cat = tx.category?.[0] || 'Other';
+      const existing = categories.get(cat) || 0;
+      categories.set(cat, existing + Math.abs(tx.amount));
       totalSpent += Math.abs(tx.amount);
     } else {
       totalIncome += tx.amount;
     }
   }
 
-  const sorted = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
-  const maxBarWidth = 20;
+  // Sort by amount descending
+  const sorted = [...categories.entries()].sort((a, b) => b[1] - a[1]);
 
-  console.log(`\nMonthly Summary (${from} -> ${to})`);
-  console.log('─'.repeat(45));
+  console.log(`\n${chalk.bold(`Monthly Summary (${from} -> ${to})`)}`);
+  console.log('─'.repeat(50));
 
   for (const [cat, amount] of sorted) {
-    const pct = totalSpent > 0 ? Math.round((amount / totalSpent) * 100) : 0;
-    const barLen = totalSpent > 0 ? Math.round((amount / totalSpent) * maxBarWidth) : 0;
-    const bar = chalk.cyan('█'.repeat(barLen));
-    const amountStr = amount.toLocaleString('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    });
-    console.log(
-      ` ${cat.padEnd(20)} ${amountStr.padStart(10)}  ${bar} ${pct}%`,
-    );
+    const pct = totalSpent > 0 ? amount / totalSpent : 0;
+    const pctStr = `${Math.round(pct * 100)}%`;
+    const bar = barChart(pct, 20);
+    const catPadded = cat.padEnd(20);
+    const amountStr = formatCurrencyPlain(amount).padStart(10);
+    console.log(` ${catPadded} ${amountStr}  ${chalk.cyan(bar)} ${pctStr}`);
   }
 
-  console.log('─'.repeat(45));
-  console.log(
-    ` ${'Total Spending'.padEnd(20)} ${totalSpent.toLocaleString('en-US', { style: 'currency', currency: 'USD' }).padStart(10)}`,
-  );
-  console.log(
-    ` ${'Total Income'.padEnd(20)} ${totalIncome.toLocaleString('en-US', { style: 'currency', currency: 'USD' }).padStart(10)}`,
-  );
-
+  console.log('─'.repeat(50));
+  console.log(` ${'Total Spending'.padEnd(20)} ${chalk.red(formatCurrencyPlain(totalSpent).padStart(10))}`);
+  console.log(` ${'Total Income'.padEnd(20)} ${chalk.green(formatCurrencyPlain(totalIncome).padStart(10))}`);
   const net = totalIncome - totalSpent;
-  console.log(` ${'Net'.padEnd(20)} ${formatCurrency(net).padStart(10)}`);
+  const netColor = net >= 0 ? chalk.green : chalk.red;
+  const netSign = net >= 0 ? '+' : '-';
+  console.log(` ${'Net'.padEnd(20)} ${netColor(`${netSign}${formatCurrencyPlain(Math.abs(net))}`.padStart(10))}`);
+  console.log();
 }

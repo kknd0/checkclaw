@@ -1,91 +1,91 @@
-import { getApiKey, getApiBaseUrl } from './config.js';
+import {
+  getApiUrl,
+  getAuthType,
+  getSessionToken,
+  getApiKey,
+  saveSession,
+} from './config.js';
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public statusCode: number,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
+export interface ApiResponse<T = unknown> {
+  ok: boolean;
+  status: number;
+  data: T;
 }
 
-async function request<T>(
-  method: string,
+export async function apiRequest<T = unknown>(
   path: string,
-  body?: unknown,
-): Promise<T> {
-  const baseUrl = getApiBaseUrl();
-  const apiKey = getApiKey();
+  options: {
+    method?: string;
+    body?: unknown;
+    query?: Record<string, string | number | undefined>;
+  } = {}
+): Promise<ApiResponse<T>> {
+  const baseUrl = getApiUrl();
+  const { method = 'GET', body, query } = options;
+
+  let url = `${baseUrl}${path}`;
+  if (query) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'checkclaw-cli/0.0.1',
+    Accept: 'application/json',
   };
 
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
+  const authType = getAuthType();
+  if (authType === 'apikey') {
+    const key = getApiKey();
+    if (key) headers['Authorization'] = `Bearer ${key}`;
+  } else if (authType === 'session') {
+    const token = getSessionToken();
+    if (token) headers['Cookie'] = token;
   }
 
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}${path}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch (err) {
-    const cause = (err as any)?.cause;
-    if (cause?.code === 'ENOTFOUND') {
-      throw new ApiError(
-        `Cannot reach API server at ${baseUrl}. Is the backend running?`,
-        0,
-      );
-    }
-    if (cause?.code === 'ECONNREFUSED') {
-      throw new ApiError(
-        `Connection refused by ${baseUrl}. Is the backend running?`,
-        0,
-      );
-    }
-    throw new ApiError(`Network error: ${(err as Error).message}`, 0);
+  const fetchOptions: RequestInit = {
+    method,
+    headers,
+    redirect: 'manual',
+  };
+  if (body) fetchOptions.body = JSON.stringify(body);
+
+  const res = await fetch(url, fetchOptions);
+
+  // Capture session cookies from Set-Cookie
+  const setCookie = res.headers.get('set-cookie');
+  if (setCookie) {
+    // Extract all cookie key=value pairs
+    const cookies = setCookie
+      .split(/,(?=\s*\w+=)/)
+      .map((c) => c.split(';')[0].trim())
+      .join('; ');
+    if (cookies) saveSession(cookies);
   }
 
-  if (!res.ok) {
-    const text = await res.text();
-    let message: string;
-    try {
-      const json = JSON.parse(text);
-      message = json.message || json.error || text;
-    } catch {
-      message = text;
-    }
-    throw new ApiError(message, res.status);
+  let data: T;
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    data = (await res.json()) as T;
+  } else {
+    data = (await res.text()) as unknown as T;
   }
 
-  return res.json() as Promise<T>;
+  return { ok: res.ok, status: res.status, data };
 }
 
-function buildUrl(
-  path: string,
-  params?: Record<string, string | number | boolean | undefined>,
-): string {
-  if (!params) return path;
-  const qs = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) {
-      qs.set(key, String(value));
-    }
+export function requireAuth(): void {
+  const authType = getAuthType();
+  if (!authType) {
+    console.error(
+      'Not authenticated. Run `checkclaw login` or `checkclaw login --key <api-key>` first.'
+    );
+    process.exit(1);
   }
-  const queryString = qs.toString();
-  return queryString ? `${path}?${queryString}` : path;
 }
-
-export const api = {
-  get: <T>(
-    path: string,
-    params?: Record<string, string | number | boolean | undefined>,
-  ) => request<T>('GET', buildUrl(path, params)),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
-  delete: <T>(path: string) => request<T>('DELETE', path),
-};
