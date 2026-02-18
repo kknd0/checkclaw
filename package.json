@@ -1,6 +1,6 @@
 {
   "name": "checkclaw",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CLI for checkclaw - query bank accounts, transactions, and manage financial data",
   "type": "module",
   "bin": {
