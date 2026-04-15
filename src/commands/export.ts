@@ -2,51 +2,37 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { apiRequest, requireAuth } from '../lib/api.js';
 import { formatCurrencyPlain, barChart } from '../utils/format.js';
-import { daysAgo, today } from '../utils/date.js';
+import { daysAgo, today, validateDaysInput, validateDateInput, displayDate } from '../utils/date.js';
 import { stringify } from 'csv-stringify/sync';
 import { writeFileSync } from 'fs';
-
-interface Transaction {
-  id: string;
-  date: string;
-  merchant?: string;
-  name?: string;
-  amount: number;
-  category?: string[];
-  account_id?: string;
-}
+import type { Transaction } from '../types.js';
 
 export function registerExportCommand(program: Command): void {
   program
     .command('export')
     .description('Export transactions to CSV or JSON')
     .option('--format <format>', 'Output format: csv or json (default: csv)', 'csv')
-    .option('--days <n>', 'Number of days to export (default: 30)', '30')
-    .option('--from <date>', 'Start date (YYYY-MM-DD)')
-    .option('--to <date>', 'End date (YYYY-MM-DD)')
+    .option('--days <n>', 'Days to export (default: 30). Plaid history limited by days_requested at link time (default 90, max 730)', '30')
+    .option('--from <date>', 'Start date YYYY-MM-DD')
+    .option('--to <date>', 'End date YYYY-MM-DD (default: today)')
     .option('-o, --output <file>', 'Output file path')
     .option('--summary', 'Show category spending summary instead of raw data')
     .action(async (opts) => {
       requireAuth();
 
       try {
-        const from = opts.from || daysAgo(parseInt(opts.days, 10));
-        const to = opts.to || today();
+        const days = validateDaysInput(opts.days);
+        const from = opts.from ? validateDateInput(opts.from, '--from') : daysAgo(days);
+        const to = opts.to ? validateDateInput(opts.to, '--to') : today();
 
-        // Fetch all transactions
-        const res = await apiRequest<{ transactions: Transaction[] }>(
-          '/transactions',
-          {
-            query: { from, to, limit: 1000 },
-          }
-        );
-
-        if (!res.ok) {
-          console.error(chalk.red('Failed to fetch transactions.'));
+        if (from > to) {
+          console.error(chalk.red('Error: --from date must be before --to date.'));
           process.exit(1);
         }
 
-        const txns = res.data.transactions || [];
+        // Fetch all transactions with auto-pagination
+        const txns = await fetchAllExportTransactions(from, to);
+
         if (txns.length === 0) {
           console.log(chalk.dim('No transactions found.'));
           return;
@@ -63,14 +49,15 @@ export function registerExportCommand(program: Command): void {
           const json = JSON.stringify(txns, null, 2);
           if (opts.output) {
             writeFileSync(opts.output, json);
-            console.log(chalk.green(`✓ Exported ${txns.length} transactions to ${opts.output}`));
+            console.log(chalk.green(`Exported ${txns.length} transactions to ${opts.output}`));
           } else {
             console.log(json);
           }
         } else {
-          // CSV
+          // CSV — include authorized_date column
           const records = txns.map((tx) => ({
             date: tx.date,
+            authorized_date: tx.authorized_date ?? '',
             merchant: tx.merchant || tx.name || '',
             amount: tx.amount,
             category: tx.category ? tx.category.join(' > ') : '',
@@ -79,12 +66,12 @@ export function registerExportCommand(program: Command): void {
 
           const csv = stringify(records, {
             header: true,
-            columns: ['date', 'merchant', 'amount', 'category', 'account_id'],
+            columns: ['date', 'authorized_date', 'merchant', 'amount', 'category', 'account_id'],
           });
 
           if (opts.output) {
             writeFileSync(opts.output, csv);
-            console.log(chalk.green(`✓ Exported ${txns.length} transactions to ${opts.output}`));
+            console.log(chalk.green(`Exported ${txns.length} transactions to ${opts.output}`));
           } else {
             process.stdout.write(csv);
           }
@@ -94,6 +81,58 @@ export function registerExportCommand(program: Command): void {
         process.exit(1);
       }
     });
+}
+
+/**
+ * Fetch all transactions with auto-pagination.
+ * Backend supports high `limit` but `offset` is non-functional,
+ * so we use date-range splitting as fallback.
+ */
+async function fetchAllExportTransactions(
+  from: string,
+  to: string
+): Promise<Transaction[]> {
+  const PAGE_LIMIT = 5000;
+
+  const res = await apiRequest<{
+    transactions: Transaction[];
+    total?: number;
+    has_more?: boolean;
+  }>('/transactions', {
+    query: { from, to, limit: PAGE_LIMIT },
+  });
+
+  if (!res.ok) {
+    console.error(chalk.red('Failed to fetch transactions.'));
+    process.exit(1);
+  }
+
+  const txns = res.data.transactions || [];
+  if (!res.data.has_more) return txns;
+
+  // Split date range in half and recurse
+  const fromMs = new Date(from + 'T00:00:00').getTime();
+  const toMs = new Date(to + 'T00:00:00').getTime();
+  const midMs = fromMs + Math.floor((toMs - fromMs) / 2);
+  const mid = new Date(midMs);
+  const midStr = `${mid.getFullYear()}-${String(mid.getMonth() + 1).padStart(2, '0')}-${String(mid.getDate()).padStart(2, '0')}`;
+
+  if (midStr <= from || midStr >= to) return txns;
+
+  const [firstHalf, secondHalf] = await Promise.all([
+    fetchAllExportTransactions(from, midStr),
+    fetchAllExportTransactions(midStr, to),
+  ]);
+
+  const seen = new Set<string>();
+  const merged: Transaction[] = [];
+  for (const tx of [...firstHalf, ...secondHalf]) {
+    if (!seen.has(tx.id)) {
+      seen.add(tx.id);
+      merged.push(tx);
+    }
+  }
+  return merged;
 }
 
 function showSummary(transactions: Transaction[], from: string, to: string): void {

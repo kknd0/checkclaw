@@ -22,3 +22,24 @@ export function parseDate(str: string): Date {
   }
   return d;
 }
+
+export function validateDateInput(str: string, flagName: string): string {
+  try {
+    parseDate(str);
+  } catch {
+    throw new Error(`Invalid ${flagName} value: "${str}". Use YYYY-MM-DD format.`);
+  }
+  return str;
+}
+
+export function validateDaysInput(str: string): number {
+  const n = parseInt(str, 10);
+  if (isNaN(n) || n <= 0) {
+    throw new Error(`Invalid --days value: "${str}". Must be a positive integer.`);
+  }
+  return n;
+}
+
+export function displayDate(tx: { date: string; authorized_date?: string | null }): string {
+  return tx.authorized_date || tx.date;
+}

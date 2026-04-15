@@ -13,10 +13,16 @@ export interface Account {
 export interface Transaction {
   id: string;
   date: string;
-  merchant: string;
+  authorized_date?: string | null;
+  datetime?: string | null;
+  authorized_datetime?: string | null;
+  merchant?: string;
+  name?: string;
   amount: number;
-  category: string[];
-  account_id: string;
+  category?: string[];
+  account_id?: string;
+  institution?: string;
+  provider?: string;
 }
 
 export interface TransactionsResponse {

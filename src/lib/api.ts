@@ -66,10 +66,10 @@ export async function apiRequest<T = unknown>(
 
   const res = await fetch(url, fetchOptions);
 
-  // Capture session cookies from Set-Cookie
+  // Capture session cookies from Set-Cookie — only when using session auth.
+  // If using API key auth, saving cookies would overwrite the key.
   const setCookie = res.headers.get('set-cookie');
-  if (setCookie) {
-    // Extract all cookie key=value pairs
+  if (setCookie && authType !== 'apikey') {
     const cookies = setCookie
       .split(/,(?=\s*\w+=)/)
       .map((c) => c.split(';')[0].trim())
