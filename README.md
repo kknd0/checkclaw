@@ -167,4 +167,4 @@ You can authenticate via:
 
 ## License
 
-MIT © [Lizi Li](https://github.com/kknd0)
+MIT © APSU AI LLC

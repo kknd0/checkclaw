@@ -1,6 +1,6 @@
 {
   "name": "checkclaw",
-  "version": "1.0.3",
+  "version": "1.0.6",
   "description": "CLI for checkclaw - query bank accounts, transactions, and manage financial data",
   "type": "module",
   "bin": {
@@ -24,7 +24,7 @@
     "accounts",
     "export"
   ],
-  "author": "Lizi Li",
+  "author": "APSU AI LLC",
   "license": "MIT",
   "repository": {
     "type": "git",
